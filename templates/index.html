@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GitHub Actions Webhook Events</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Roboto:400,700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            background: linear-gradient(120deg, #f0f4f9 0%, #e0e7ef 100%);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 48px auto;
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.09);
+            padding: 40px 28px 32px 28px;
+        }
+        h1 {
+            text-align: center;
+            color: #2d3a4a;
+            font-size: 2.2rem;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #6b7a8f;
+            font-size: 1.1rem;
+            margin-bottom: 28px;
+        }
+        .events-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 22px;
+            padding: 0;
+            margin: 0;
+        }
+        .event-card {
+            background: #f7fafd;
+            border-radius: 12px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.04);
+            padding: 22px 20px 18px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            position: relative;
+            transition: box-shadow 0.2s;
+        }
+        .event-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .event-icon {
+            font-size: 2.1rem;
+        }
+        .event-badge {
+            font-size: 0.95rem;
+            font-weight: 700;
+            padding: 3px 12px;
+            border-radius: 12px;
+            margin-left: 6px;
+            letter-spacing: 0.5px;
+            display: inline-block;
+        }
+        .badge-push { background: #e3fcec; color: #1a7f37; }
+        .badge-pr { background: #e7f0fd; color: #2156a5; }
+        .badge-merge { background: #f3e8ff; color: #7c3aed; }
+        .event-author {
+            font-weight: 700;
+            color: #2d3a4a;
+            font-size: 1.08rem;
+        }
+        .event-details {
+            color: #4b5563;
+            font-size: 1.01rem;
+        }
+        .event-time {
+            color: #8b98a9;
+            font-size: 0.98rem;
+            margin-top: 2px;
+        }
+        .event-branches {
+            margin-top: 2px;
+            font-size: 0.99rem;
+        }
+        .branch {
+            background: #e5e7eb;
+            color: #374151;
+            border-radius: 8px;
+            padding: 2px 8px;
+            font-size: 0.97rem;
+            margin: 0 2px;
+            font-family: monospace;
+        }
+        .event-id {
+            position: absolute;
+            top: 12px;
+            right: 18px;
+            font-size: 0.85rem;
+            color: #b0b7c3;
+        }
+        .loading {
+            text-align: center;
+            color: #6b7a8f;
+            font-size: 1.1rem;
+            margin-top: 30px;
+        }
+        @media (max-width: 700px) {
+            .container { padding: 18px 2vw; }
+            h1 { font-size: 1.4rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>GitHub Actions Activity</h1>
+        <div class="subtitle">Live updates from webhook events (refreshes every 15 seconds)</div>
+        <div class="events-grid" id="events"></div>
+        <div class="loading" id="loading">Loading events...</div>
+    </div>
+    <script>
+        function getIcon(action) {
+            if (action === 'PUSH') return '🚀';
+            if (action === 'PULL_REQUEST') return '🔀';
+            if (action === 'MERGE') return '✅';
+            return 'ℹ️';
+        }
+        function getBadge(action) {
+            if (action === 'PUSH') return '<span class="event-badge badge-push">Push</span>';
+            if (action === 'PULL_REQUEST') return '<span class="event-badge badge-pr">Pull Request</span>';
+            if (action === 'MERGE') return '<span class="event-badge badge-merge">Merge</span>';
+            return '<span class="event-badge">Other</span>';
+        }
+        function getRelativeTime(utcString) {
+            if (!utcString) return '';
+            // Parse "01 Apr 2021 - 09:30 PM UTC"
+            const parts = utcString.match(/(\d{1,2}) (\w{3}) (\d{4}) - (\d{2}):(\d{2}) (AM|PM) UTC/);
+            if (!parts) return utcString;
+            const [_, day, mon, year, hour, min, ampm] = parts;
+            const months = {Jan:0,Feb:1,Mar:2,Apr:3,May:4,Jun:5,Jul:6,Aug:7,Sep:8,Oct:9,Nov:10,Dec:11};
+            let h = parseInt(hour,10);
+            if (ampm === 'PM' && h !== 12) h += 12;
+            if (ampm === 'AM' && h === 12) h = 0;
+            const date = new Date(Date.UTC(parseInt(year), months[mon], parseInt(day), h, parseInt(min)));
+            const now = new Date();
+            const diff = Math.floor((now.getTime() - date.getTime())/1000);
+            if (diff < 60) return `${diff} seconds ago`;
+            if (diff < 3600) return `${Math.floor(diff/60)} minutes ago`;
+            if (diff < 86400) return `${Math.floor(diff/3600)} hours ago`;
+            return date.toUTCString().replace('GMT','UTC');
+        }
+        function renderEventCard(event) {
+            return `
+            <div class="event-card">
+                <div class="event-id">#${event.request_id || event.id}</div>
+                <div class="event-header">
+                    <span class="event-icon">${getIcon(event.action)}</span>
+                    <span class="event-author">${event.author || 'Unknown'}</span>
+                    ${getBadge(event.action)}
+                </div>
+                <div class="event-details">
+                    ${event.action === 'PUSH' ? `pushed to <span class="branch">${event.to_branch}</span>` : ''}
+                    ${event.action === 'PULL_REQUEST' ? `submitted a pull request from <span class="branch">${event.from_branch}</span> to <span class="branch">${event.to_branch}</span>` : ''}
+                    ${event.action === 'MERGE' ? `merged branch <span class="branch">${event.from_branch}</span> to <span class="branch">${event.to_branch}</span>` : ''}
+                </div>
+                <div class="event-time">${getRelativeTime(event.timestamp)}</div>
+            </div>
+            `;
+        }
+        function fetchEvents() {
+            document.getElementById('loading').style.display = 'block';
+            fetch('/events')
+                .then(response => response.json())
+                .then(data => {
+                    const eventsGrid = document.getElementById('events');
+                    eventsGrid.innerHTML = '';
+                    if (data.length === 0) {
+                        document.getElementById('loading').textContent = 'No events yet.';
+                        return;
+                    }
+                    data.forEach(event => {
+                        eventsGrid.innerHTML += renderEventCard(event);
+                    });
+                    document.getElementById('loading').style.display = 'none';
+                })
+                .catch(() => {
+                    document.getElementById('loading').textContent = 'Failed to load events.';
+                });
+        }
+        fetchEvents();
+        setInterval(fetchEvents, 15000);
+    </script>
+</body>
+</html>
